@@ -275,7 +275,7 @@
         </constructor-arg>
         <property name="logoutRequestMatcher" ref="uiLogoutRequestMatcher"/>
     </bean>
-    <bean id="savedRequestCache" class="org.springframework.security.web.savedrequest.HttpSessionRequestCache">
+    <bean id="savedRequestCache" class="org.cloudfoundry.identity.uaa.web.UaaSavedRequestCache">
         <property name="requestMatcher" ref="uiAuthorizeRequestMatcher"/>
     </bean>
     <http name="uiSecurity"
