@@ -44,6 +44,7 @@ import org.cloudfoundry.identity.uaa.user.UaaUserDatabase;
 import org.cloudfoundry.identity.uaa.util.JsonUtils;
 import org.cloudfoundry.identity.uaa.util.SetServerNameRequestPostProcessor;
 import org.cloudfoundry.identity.uaa.util.UaaUrlUtils;
+import org.cloudfoundry.identity.uaa.web.UaaSavedRequestAwareAuthenticationSuccessHandler;
 import org.cloudfoundry.identity.uaa.zone.IdentityZone;
 import org.cloudfoundry.identity.uaa.zone.IdentityZoneHolder;
 import org.cloudfoundry.identity.uaa.zone.IdentityZoneProvisioning;
@@ -68,14 +69,17 @@ import org.springframework.security.oauth2.provider.AuthorizationRequest;
 import org.springframework.security.oauth2.provider.OAuth2Authentication;
 import org.springframework.security.oauth2.provider.client.BaseClientDetails;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.savedrequest.SavedRequest;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.util.UriUtils;
 
 import javax.servlet.http.HttpSession;
 import java.io.UnsupportedEncodingException;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.sql.Timestamp;
@@ -104,8 +108,11 @@ import static org.cloudfoundry.identity.uaa.oauth.token.TokenConstants.ID_TOKEN_
 import static org.cloudfoundry.identity.uaa.oauth.token.TokenConstants.OPAQUE;
 import static org.cloudfoundry.identity.uaa.oauth.token.TokenConstants.REFRESH_TOKEN_SUFFIX;
 import static org.cloudfoundry.identity.uaa.oauth.token.TokenConstants.REQUEST_TOKEN_FORMAT;
+import static org.cloudfoundry.identity.uaa.web.UaaSavedRequestAwareAuthenticationSuccessHandler.FORM_REDIRECT_PARAMETER;
+import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.lessThanOrEqualTo;
@@ -130,6 +137,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -886,6 +894,71 @@ public class TokenMvcMockTests extends AbstractTokenMockMvcTests {
         location = location.substring(0,location.indexOf("&code="));
         assertEquals(subDomainUri, location);
     }
+
+    @Test
+    public void ensure_that_form_redirect_is_not_a_parameter_unless_there_is_a_saved_request() throws Exception {
+        getMockMvc().perform(
+            get("/login")
+                .session(new MockHttpSession())
+        )
+            .andDo(print())
+            .andExpect(content().string(not(containsString(FORM_REDIRECT_PARAMETER))));
+    }
+
+    @Test
+    public void test_authorization_code_grant_redirect_when_session_expires() throws Exception {
+        String redirectUri = "https://example.com/dashboard/?appGuid=app-guid&ace_config=test";
+
+        String clientId = "authclient-"+ generator.generate();
+        String scopes = "openid";
+        setUpClients(clientId, scopes, scopes, GRANT_TYPES, true, redirectUri);
+        String username = "authuser"+ generator.generate();
+        String userScopes = "openid";
+        ScimUser user = setUpUser(username, userScopes, OriginKeys.UAA, IdentityZoneHolder.get().getId());
+        String state = generator.generate();
+
+        String url = UriComponentsBuilder
+            .fromUriString("/oauth/authorize?response_type=code&scope=openid&state={state}&client_id={clientId}&redirect_uri={redirectUri}")
+            .buildAndExpand(state,clientId,redirectUri)
+            .encode()
+            .toUri()
+            .toString();
+
+        String encodedRedirectUri = UriUtils.encodeQueryParam(redirectUri, "ISO-8859-1");
+
+        MvcResult result = getMockMvc()
+            .perform(get(new URI(url)))
+            .andExpect(status().is3xxRedirection())
+            .andReturn();
+        String location = result.getResponse().getHeader("Location");
+        assertThat(location, endsWith("/login"));
+
+        MockHttpSession session = (MockHttpSession) result.getRequest().getSession(false);
+        assertNotNull(session);
+        SavedRequest savedRequest = (SavedRequest) session.getAttribute(UaaSavedRequestAwareAuthenticationSuccessHandler.SAVED_REQUEST_SESSION_ATTRIBUTE);
+        assertNotNull(savedRequest);
+
+        getMockMvc().perform(
+            get("/login")
+            .session(session)
+        )
+            .andDo(print())
+            .andExpect(content().string(containsString(FORM_REDIRECT_PARAMETER)))
+            .andExpect(content().string(containsString(encodedRedirectUri)));
+
+        //attempt to login without a session
+        getMockMvc().perform(
+            post("/login.do")
+                .with(cookieCsrf())
+                .param("form_redirect_uri", url)
+                .param("username", username)
+                .param("password", SECRET)
+        )
+            .andExpect(status().isFound())
+            .andExpect(header().string("Location", url));
+    }
+
+
 
     @Test
     public void testAuthorizationCodeGrantWithEncodedRedirectURL() throws Exception {
