@@ -275,9 +275,12 @@
         </constructor-arg>
         <property name="logoutRequestMatcher" ref="uiLogoutRequestMatcher"/>
     </bean>
-    <bean id="savedRequestCache" class="org.cloudfoundry.identity.uaa.web.UaaSavedRequestCache">
+    <bean id="savedRequestCache" class="org.springframework.security.web.savedrequest.HttpSessionRequestCache">
         <property name="requestMatcher" ref="uiAuthorizeRequestMatcher"/>
     </bean>
+
+    <bean name="clientRedirectStateFilter" class="org.cloudfoundry.identity.uaa.web.UaaSavedRequestCacheFilter"/>
+
     <http name="uiSecurity"
           request-matcher-ref="uiRequestMatcher"
           use-expressions="false"
@@ -297,6 +300,7 @@
         <!--<logout logout-url="/logout.do" success-handler-ref="logoutHandler" invalidate-session="true"/>-->
         <custom-filter ref="logoutFilter" after="LOGOUT_FILTER"/>
         <custom-filter ref="samlLogoutFilter" before="LOGOUT_FILTER"/>
+        <custom-filter ref="clientRedirectStateFilter" before="FORM_LOGIN_FILTER"/>
         <csrf disabled="false"
               token-repository-ref="loginCookieCsrfRepository"
               request-matcher-ref="uiCookeCsrfRequestMatcher"/>

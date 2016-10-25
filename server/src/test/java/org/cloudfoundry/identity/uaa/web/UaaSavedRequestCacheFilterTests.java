@@ -15,14 +15,15 @@
 
 package org.cloudfoundry.identity.uaa.web;
 
+import org.cloudfoundry.identity.uaa.web.UaaSavedRequestCacheFilter.ClientRedirectSavedRequest;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.web.savedrequest.SavedRequest;
-import org.springframework.security.web.util.matcher.RequestMatcher;
 
+import javax.servlet.FilterChain;
 import javax.servlet.http.HttpSession;
 
 import static org.cloudfoundry.identity.uaa.web.UaaSavedRequestAwareAuthenticationSuccessHandler.FORM_REDIRECT_PARAMETER;
@@ -32,35 +33,31 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.anyObject;
-import static org.mockito.Matchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.POST;
 
-public class UaaSavedRequestCacheTests {
+public class UaaSavedRequestCacheFilterTests {
 
-    private UaaSavedRequestCache cache;
-    private RequestMatcher matcher;
-    private UaaSavedRequestCache spy;
+    private UaaSavedRequestCacheFilter cache;
+    private UaaSavedRequestCacheFilter spy;
     private MockHttpSession session;
     private MockHttpServletRequest request;
     private String redirectUri;
+    private FilterChain chain;
 
     @Before
     public void setup() {
-        cache = new UaaSavedRequestCache();
-        matcher = mock(RequestMatcher.class);
-        when(matcher.matches(anyObject())).thenReturn(false);
-        cache.setRequestMatcher(matcher);
+        cache = new UaaSavedRequestCacheFilter();
         spy = spy(cache);
         session = new MockHttpSession();
         request = new MockHttpServletRequest(POST.name(), "/login.do");
         redirectUri = "http://test";
+        chain = mock(FilterChain.class);
     }
 
 
@@ -68,16 +65,17 @@ public class UaaSavedRequestCacheTests {
     public void saveFormRedirectRequest() throws Exception {
         request.setSession(session);
         request.setParameter(FORM_REDIRECT_PARAMETER, "http://login");
-        spy.saveRequest(request, new MockHttpServletResponse());
+        spy.doFilterInternal(request, new MockHttpServletResponse(), chain);
         verify(spy).saveFormParameter(request);
+        verify(chain, times(1)).doFilter(anyObject(), anyObject());
     }
 
     @Test
     public void do_not_save_form() throws Exception {
         request.setSession(session);
-        spy.saveRequest(request, new MockHttpServletResponse());
+        spy.doFilterInternal(request, new MockHttpServletResponse(), chain);
         verify(spy, never()).saveFormParameter(request);
-        verify(matcher, times(1)).matches(same(request));
+        verify(chain, times(1)).doFilter(anyObject(), anyObject());
     }
 
 
@@ -90,7 +88,7 @@ public class UaaSavedRequestCacheTests {
         assertTrue(cache.shouldSaveFormRedirectParameter(request));
         request.setSession(session);
         assertTrue(cache.shouldSaveFormRedirectParameter(request));
-        UaaSavedRequestCache.ClientRedirectSavedRequest savedRequest = new UaaSavedRequestCache.ClientRedirectSavedRequest(redirectUri);
+        ClientRedirectSavedRequest savedRequest = new ClientRedirectSavedRequest(request);
         session.setAttribute(SAVED_REQUEST_SESSION_ATTRIBUTE, savedRequest);
         assertFalse(cache.shouldSaveFormRedirectParameter(request));
     }

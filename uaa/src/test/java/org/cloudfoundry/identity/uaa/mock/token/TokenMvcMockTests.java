@@ -44,7 +44,6 @@ import org.cloudfoundry.identity.uaa.user.UaaUserDatabase;
 import org.cloudfoundry.identity.uaa.util.JsonUtils;
 import org.cloudfoundry.identity.uaa.util.SetServerNameRequestPostProcessor;
 import org.cloudfoundry.identity.uaa.util.UaaUrlUtils;
-import org.cloudfoundry.identity.uaa.web.UaaSavedRequestAwareAuthenticationSuccessHandler;
 import org.cloudfoundry.identity.uaa.zone.IdentityZone;
 import org.cloudfoundry.identity.uaa.zone.IdentityZoneHolder;
 import org.cloudfoundry.identity.uaa.zone.IdentityZoneProvisioning;
@@ -109,6 +108,7 @@ import static org.cloudfoundry.identity.uaa.oauth.token.TokenConstants.OPAQUE;
 import static org.cloudfoundry.identity.uaa.oauth.token.TokenConstants.REFRESH_TOKEN_SUFFIX;
 import static org.cloudfoundry.identity.uaa.oauth.token.TokenConstants.REQUEST_TOKEN_FORMAT;
 import static org.cloudfoundry.identity.uaa.web.UaaSavedRequestAwareAuthenticationSuccessHandler.FORM_REDIRECT_PARAMETER;
+import static org.cloudfoundry.identity.uaa.web.UaaSavedRequestAwareAuthenticationSuccessHandler.SAVED_REQUEST_SESSION_ATTRIBUTE;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
@@ -897,9 +897,19 @@ public class TokenMvcMockTests extends AbstractTokenMockMvcTests {
 
     @Test
     public void ensure_that_form_redirect_is_not_a_parameter_unless_there_is_a_saved_request() throws Exception {
+        //make sure we don't create a session on the homepage
+        assertNull(
+            getMockMvc().perform(
+                get("/login")
+            )
+                .andDo(print())
+                .andExpect(content().string(not(containsString(FORM_REDIRECT_PARAMETER))))
+                .andReturn().getRequest().getSession(false));
+
+        //if there is a session, but no saved request
         getMockMvc().perform(
             get("/login")
-                .session(new MockHttpSession())
+            .session(new MockHttpSession())
         )
             .andDo(print())
             .andExpect(content().string(not(containsString(FORM_REDIRECT_PARAMETER))));
@@ -935,7 +945,7 @@ public class TokenMvcMockTests extends AbstractTokenMockMvcTests {
 
         MockHttpSession session = (MockHttpSession) result.getRequest().getSession(false);
         assertNotNull(session);
-        SavedRequest savedRequest = (SavedRequest) session.getAttribute(UaaSavedRequestAwareAuthenticationSuccessHandler.SAVED_REQUEST_SESSION_ATTRIBUTE);
+        SavedRequest savedRequest = (SavedRequest) session.getAttribute(SAVED_REQUEST_SESSION_ATTRIBUTE);
         assertNotNull(savedRequest);
 
         getMockMvc().perform(
@@ -943,6 +953,34 @@ public class TokenMvcMockTests extends AbstractTokenMockMvcTests {
             .session(session)
         )
             .andDo(print())
+            .andExpect(status().isOk())
+            .andExpect(content().string(containsString(FORM_REDIRECT_PARAMETER)))
+            .andExpect(content().string(containsString(encodedRedirectUri)));
+
+        //a failed login should survive the flow
+        //attempt to login without a session
+        result = getMockMvc().perform(
+            post("/login.do")
+                .with(cookieCsrf())
+                .param("form_redirect_uri", url)
+                .param("username", username)
+                .param("password", "invalid")
+        )
+            .andExpect(status().isFound())
+            .andExpect(header().string("Location", containsString("/login")))
+            .andReturn();
+
+        session = (MockHttpSession) result.getRequest().getSession(false);
+        assertNotNull(session);
+        savedRequest = (SavedRequest) session.getAttribute(SAVED_REQUEST_SESSION_ATTRIBUTE);
+        assertNotNull(savedRequest);
+
+        getMockMvc().perform(
+            get("/login")
+                .session(session)
+        )
+            .andDo(print())
+            .andExpect(status().isOk())
             .andExpect(content().string(containsString(FORM_REDIRECT_PARAMETER)))
             .andExpect(content().string(containsString(encodedRedirectUri)));
 
