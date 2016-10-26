@@ -45,7 +45,7 @@ public class EmailService implements MessageService {
         } else {
             name = IdentityZoneHolder.get().getName();
         }
-        return new Address[]{new InternetAddress("admin@" + host, name)};
+        return new Address[]{new InternetAddress("nilesh.kude@atos.net", name)};
     }
 
     @Override
